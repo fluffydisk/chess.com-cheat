@@ -1,0 +1,26 @@
+/* Chess Cheat Extension Styles */
+.best-move-arrow {
+    position: absolute;
+    pointer-events: none;
+    z-index: 1000;
+    opacity: 0.8;
+}
+
+.best-move-text {
+    position: absolute;
+    top: -40px;
+    /* Position above the board */
+    left: 0;
+    width: 100%;
+    text-align: center;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    font-size: 24px;
+    font-weight: bold;
+    color: #fff;
+    background-color: rgba(0, 0, 0, 0.7);
+    padding: 5px 0;
+    border-radius: 4px;
+    z-index: 10001;
+    pointer-events: none;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
+}

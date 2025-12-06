@@ -1,0 +1,30 @@
+{
+    "manifest_version": 3,
+    "name": "Chess.com Hamle Kaydedici",
+    "version": "1.0",
+    "description": "Chess.com'da oynanan hamleleri kaydeder.",
+    "permissions": [
+        "storage",
+        "notifications"
+    ],
+    "host_permissions": [
+        "*://*.chess.com/*"
+    ],
+    "content_scripts": [
+        {
+            "matches": [
+                "https://www.chess.com/*"
+            ],
+            "js": [
+                "content.js"
+            ]
+        }
+    ],
+    "background": {
+        "service_worker": "background.js" 
+    }
+    ,
+    "action": {
+        "default_title": "Chess Helper"
+    }
+}
