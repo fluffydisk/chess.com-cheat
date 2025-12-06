@@ -2,7 +2,7 @@
     "manifest_version": 3,
     "name": "Chess.com Hamle Kaydedici",
     "version": "1.0",
-    "description": "Chess.com'da oynanan hamleleri kaydeder.",
+    "description": "Records moves played on Chess.com.",
     "permissions": [
         "storage",
         "notifications"
@@ -21,10 +21,10 @@
         }
     ],
     "background": {
-        "service_worker": "background.js" 
-    }
-    ,
+        "service_worker": "background.js"
+    },
     "action": {
-        "default_title": "Chess Helper"
+        "default_title": "Chess Helper",
+        "default_popup": "popup.html"
     }
 }

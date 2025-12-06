@@ -9,6 +9,8 @@ console.log("🧩 [Content Script] Chess.com Assistant yüklendi.");
 let lastSavedCount = 0;
 let lastGameData = null;
 let lastSavedMoves = null;
+let lastGameUrl = null;
+let lastUserName = null;
 let saveTimer = null;
 // Saved player info (may be set via popup)
 let playerName = null;
@@ -29,15 +31,30 @@ chrome.storage && chrome.storage.onChanged && chrome.storage.onChanged.addListen
     if (area !== 'local') return;
     if (changes.savedPlayerName) playerName = changes.savedPlayerName.newValue;
     if (changes.savedPlayerColor) playerColor = changes.savedPlayerColor.newValue;
+    try { console.log('🗂️ [Content] storage.onChanged', changes); } catch (e) {}
 });
 
 // Respond to popup 'detectUser' requests by attempting to read a username from the page
+
 chrome.runtime && chrome.runtime.onMessage && chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request && request.action === 'detectUser') {
         const possible = document.querySelector('.header-user-username, .user-block .username, [data-test-element="menu-username"], a.header-user-link, [data-test-element="user-tagline-username"]');
         const detected = possible && possible.textContent ? possible.textContent.trim() : null;
+        try { console.log('📨 [Content] detectUser ->', detected); } catch (e) {}
         sendResponse({ suggestedName: detected });
         return true; // keep message channel open briefly
+    }
+    if (request && request.action === 'forceRefresh') {
+        try { console.log('📨 [Content] forceRefresh received'); } catch (e) {}
+        // Try to locate move list node and log status (helps debugging when popup is on different tab)
+        try {
+            const node = findMoveListNode();
+            if (node) try { console.log('🔎 [Content] move list node found for forceRefresh'); } catch (e) {}
+            else try { console.log('🔎 [Content] move list node NOT found for forceRefresh'); } catch (e) {}
+        } catch (e) {}
+        extractAndSaveMoves(true); // force refresh
+        try { sendResponse && sendResponse({ ok: true }); } catch (e) {}
+        return true;
     }
 });
 
@@ -161,8 +178,9 @@ function getMoveTextFromElement(el) {
     return parts.join('').replace(/\s+/g, ' ').trim();
 }
 
-function extractAndSaveMoves() {
-    // extractAndSaveMoves invoked when observer detects updates
+function extractAndSaveMoves(force) {
+    // extractAndSaveMoves invoked when observer detects updates or forced
+    try { console.log('♟️ [Content] extractAndSaveMoves called, force=', !!force); } catch (e) {}
 
     const selectors = [
         'wc-simple-move-list .main-line-row.move-list-row',
@@ -179,67 +197,84 @@ function extractAndSaveMoves() {
     });
 
     const moveRows = Array.from(rowsSet);
-    // number of DOM rows found: moveRows.length
-
     let moves = [];
+    try { console.log('♟️ [Content] moveRows length =', moveRows.length); } catch (e) {}
 
     moveRows.forEach(rowElement => {
-        const moveNumber = rowElement.getAttribute('data-whole-move-number') || rowElement.querySelector('.move-number')?.textContent?.trim() || '';
-
-        // Beyaz hamleyi dene
         let whiteMove = '';
         const whiteEl = rowElement.querySelector('.node.white-move .node-highlight-content') || rowElement.querySelector('.white') || rowElement.querySelector('.move.white');
         if (whiteEl) whiteMove = getMoveTextFromElement(whiteEl);
 
-        // Siyah hamleyi dene
         let blackMove = '';
         const blackEl = rowElement.querySelector('.node.black-move .node-highlight-content') || rowElement.querySelector('.black') || rowElement.querySelector('.move.black');
         if (blackEl) blackMove = getMoveTextFromElement(blackEl);
 
-        // Hamle numaralarını KALDIRarak sadece SAN hamleleri kaydet
         if (whiteMove) moves.push(whiteMove);
         if (blackMove) moves.push(blackMove);
     });
 
-        // If moves are identical to last saved moves, skip
-        const same = Array.isArray(lastSavedMoves) && lastSavedMoves.length === moves.length && lastSavedMoves.every((v,i) => v === moves[i]);
-        if (same) return;
+    // Kullanıcı adı veya oyun url'si değiştiyse move listesini sıfırla
+    const playerNames = getPlayerNames();
+    // Prefer page header username for change detection; fall back to stored playerName
+    const headerUser = document.querySelector('.header-user-username, .user-block .username, [data-test-element="menu-username"], a.header-user-link, [data-test-element="user-tagline-username"]')?.textContent?.trim() || null;
+    const userNameNow = headerUser || (typeof playerName === 'string' && playerName.trim().length > 0 ? playerName.trim() : null);
+    const urlNow = location.href;
+    let reset = false;
+    if (lastGameUrl && lastGameUrl !== urlNow) reset = true;
+    if (lastUserName && userNameNow && lastUserName !== userNameNow) reset = true;
+    // If header username changed (and we have a header value), force clear storage so popup stops showing old game
+    if (headerUser && lastUserName && headerUser !== lastUserName) {
+        try { console.log('🔁 [Content] header user changed from', lastUserName, 'to', headerUser); } catch (e) {}
+        try {
+            chrome.storage && chrome.storage.local && chrome.storage.local.set({ currentGameMoves: [], currentGameData: null }, () => {
+                try { console.log('💾 [Content] cleared stored currentGameMoves/currentGameData due to header user change'); } catch (e) {}
+            });
+        } catch (e) { try { console.warn('⚠️ [Content] storage clear failed', e); } catch (z) {} }
+        lastSavedMoves = null;
+    }
+    if (reset) {
+        lastSavedMoves = null;
+    }
+    lastGameUrl = urlNow;
+    lastUserName = userNameNow;
 
-        // debounce saves to avoid rapid duplicate writes
-        if (saveTimer) clearTimeout(saveTimer);
-        saveTimer = setTimeout(() => {
-            saveTimer = null;
-            const playerNames = getPlayerNames();
-            const userSide = isUserWhiteOrBlack();
-            const gameData = {
-                moves: moves,
-                white: playerNames.white,
-                black: playerNames.black,
-                userSide: userSide,
-                url: location.href,
-                timestamp: Date.now()
-            };
-            lastGameData = gameData;
-            lastSavedMoves = moves.slice();
+    // If moves are identical to last saved moves, skip (unless force)
+    const same = Array.isArray(lastSavedMoves) && lastSavedMoves.length === moves.length && lastSavedMoves.every((v,i) => v === moves[i]);
+    if (same && !force) return;
 
-            // Write directly to storage so popup `refresh` always sees latest data
-            try {
-                chrome.storage && chrome.storage.local && chrome.storage.local.set({ currentGameMoves: moves, currentGameData: { white: gameData.white, black: gameData.black, userSide: gameData.userSide, url: gameData.url, timestamp: gameData.timestamp } }, () => {
-                    if (chrome.runtime.lastError) {
-                        console.warn('⚠️ [Content] storage.set hata:', chrome.runtime.lastError.message);
-                    }
-                });
-            } catch (e) {
-                console.warn('⚠️ [Content] storage.set exception:', e && e.message);
-            }
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+        saveTimer = null;
+        const userSide = isUserWhiteOrBlack();
+        const gameData = {
+            moves: moves,
+            white: playerNames.white,
+            black: playerNames.black,
+            userSide: userSide,
+            url: location.href,
+            timestamp: Date.now()
+        };
+        lastGameData = gameData;
+        lastSavedMoves = moves.slice();
 
-            // Also notify background for history tracking (best-effort)
-            try {
-                chrome.runtime.sendMessage({ action: 'saveMoves', data: gameData });
-            } catch (e) {
-                // ignore messaging errors
-            }
-        }, 120);
+        try {
+            chrome.storage && chrome.storage.local && chrome.storage.local.set({ currentGameMoves: moves, currentGameData: { white: gameData.white, black: gameData.black, userSide: gameData.userSide, url: gameData.url, timestamp: gameData.timestamp } }, () => {
+                if (chrome.runtime.lastError) {
+                    console.warn('⚠️ [Content] storage.set hata:', chrome.runtime.lastError.message);
+                } else {
+                    try { console.log('💾 [Content] saved currentGameMoves length=', moves.length, 'url=', gameData.url); } catch (e) {}
+                }
+            });
+        } catch (e) {
+            console.warn('⚠️ [Content] storage.set exception:', e && e.message);
+        }
+
+        try {
+            chrome.runtime.sendMessage({ action: 'saveMoves', data: gameData });
+        } catch (e) {
+            // ignore messaging errors
+        }
+    }, 120);
 }
 
 

@@ -1,27 +1,35 @@
 <!doctype html>
 <html>
+
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Chess Helper - Ayarlar</title>
+  <title>Chess Helper</title>
   <link rel="stylesheet" href="popup.css">
 </head>
+
 <body>
   <div class="container">
     <div class="tabs">
-      <button class="tab-btn active" data-tab="moves">Hamleler</button>
+      <button class="tab-btn active" data-tab="moves">Moves</button>
       <button class="tab-btn" data-tab="best">Best Move</button>
+      <button id="detachBtn" class="detach-btn" title="Open as Window">↗</button>
     </div>
 
     <div class="tab-panel" id="moves" style="display:block;">
       <div class="moves-header">
-        <div id="gameMeta" class="game-meta">Oyun bilgisi yükleniyor...</div>
-        <button id="refreshMoves">Yenile</button>
+        <div id="gameMeta" class="game-meta">Loading game info...</div>
+        <div class="moves-actions">
+          <button id="refreshMoves">Refresh</button>
+          <button id="detectUserBtn">Detect User</button>
+        </div>
       </div>
+      <div id="statusMessage" class="status-message" aria-live="polite"></div>
+      <div id="lastUpdated" class="last-updated"></div>
       <div id="movesContainer" class="moves-container" tabindex="0">
         <ul id="movesList" class="moves-list"></ul>
       </div>
-      <div class="moves-hint">Fareyle sürükleyerek kaydırabilirsiniz (veya scroll kullanın).</div>
+      <div class="moves-hint">Drag to scroll (or use the mouse wheel).</div>
     </div>
     <div class="tab-panel" id="best" style="display:none;">
       <h3>Best Move</h3>
@@ -33,22 +41,23 @@
           <option value="12">12</option>
           <option value="15" selected>15</option>
         </select>
-        <button id="computeBest">Hesapla</button>
+        <button id="computeBest">Compute</button>
       </div>
-      <div id="bestResult" class="best-result">Henüz hesaplanmadı.</div>
+      <div id="bestResult" class="best-result">Not computed yet.</div>
       <div id="bestInfo" class="best-info"></div>
     </div>
   </div>
   <script>
-    console.log('Inline script: HTML yüklendi');
+    console.log('Inline script: HTML loaded');
   </script>
   <script src="chess.js"></script>
   <script>
-    console.log('chess.js yüklendi, Chess tanımı:', typeof Chess);
+    console.log('chess.js loaded, Chess type:', typeof Chess);
   </script>
   <script src="popup.js"></script>
   <script>
-    console.log('popup.js yüklendi');
+    console.log('popup.js loaded');
   </script>
 </body>
+
 </html>

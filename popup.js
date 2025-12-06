@@ -9,6 +9,24 @@ document.addEventListener('DOMContentLoaded', () => {
   const bestResult = document.getElementById('bestResult');
   const bestInfo = document.getElementById('bestInfo');
   const depthSelect = document.getElementById('depth');
+  const detachBtn = document.getElementById('detachBtn');
+
+  // Detach logic
+  if (detachBtn) {
+    const isDetached = new URLSearchParams(window.location.search).has('detached');
+    if (isDetached) {
+      detachBtn.style.display = 'none';
+    }
+    detachBtn.addEventListener('click', () => {
+      chrome.windows.create({
+        url: 'popup.html?detached=true',
+        type: 'popup',
+        width: 360,
+        height: 600
+      });
+      window.close();
+    });
+  }
 
   // Tab switching function
   function switchTab(tabName) {
@@ -34,14 +52,14 @@ document.addEventListener('DOMContentLoaded', () => {
       const lastTab = res.lastOpenTab || 'moves';
       switchTab(lastTab);
     });
-  } catch (e) {}
+  } catch (e) { }
 
   // Load moves from storage
   try {
-    chrome.storage.local.get(['currentGameMoves','currentGameData'], (res) => {
+    chrome.storage.local.get(['currentGameMoves', 'currentGameData'], (res) => {
       renderMoves(res.currentGameMoves || [], res.currentGameData || null);
     });
-  } catch (e) {}
+  } catch (e) { }
 
   // Storage change listener to update moves live
   try {
@@ -51,13 +69,24 @@ document.addEventListener('DOMContentLoaded', () => {
         const moves = (changes.currentGameMoves && changes.currentGameMoves.newValue) || null;
         const meta = (changes.currentGameData && changes.currentGameData.newValue) || null;
         if (moves !== null) renderMoves(moves, meta);
-        else chrome.storage.local.get(['currentGameMoves','currentGameData'], (res) => renderMoves(res.currentGameMoves||[], res.currentGameData||null));
+        else chrome.storage.local.get(['currentGameMoves', 'currentGameData'], (res) => renderMoves(res.currentGameMoves || [], res.currentGameData || null));
       }
     });
-  } catch (e) {}
+  } catch (e) { }
 
   refreshMoves.addEventListener('click', () => {
-    chrome.storage.local.get(['currentGameMoves','currentGameData'], (res) => renderMoves(res.currentGameMoves||[], res.currentGameData||null));
+    // Aktif sekmeye forceRefresh mesajı gönder
+    chrome.tabs && chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
+      if (tabs && tabs[0] && tabs[0].id) {
+        chrome.tabs.sendMessage(tabs[0].id, { action: 'forceRefresh' }, function (response) {
+          // Gerekirse response kontrolü
+          window.location.reload(); // Popup'ı güncelle
+        });
+      } else {
+        // Fallback: sadece storage'dan oku
+        chrome.storage.local.get(['currentGameMoves', 'currentGameData'], (res) => renderMoves(res.currentGameMoves || [], res.currentGameData || null));
+      }
+    });
   });
 
   // Drag-to-scroll implementation for movesContainer
@@ -82,7 +111,7 @@ document.addEventListener('DOMContentLoaded', () => {
     moves = moves || [];
     movesList.innerHTML = '';
     if (!moves || moves.length === 0) {
-      movesList.innerHTML = '<li>Henüz hamle yok.</li>';
+      movesList.innerHTML = '<li>No moves yet.</li>';
     } else {
       moves.forEach((m, idx) => {
         const li = document.createElement('li');
@@ -102,9 +131,9 @@ document.addEventListener('DOMContentLoaded', () => {
       const w = meta.white || '';
       const b = meta.black || '';
       const side = meta.userSide || '';
-      gameMeta.textContent = `${w} vs ${b} — Siz: ${side || 'unknown'}`;
+      gameMeta.textContent = `${w} vs ${b} — You: ${side || 'unknown'}`;
     } else {
-      gameMeta.textContent = 'Oyun bilgisi yok';
+      gameMeta.textContent = 'No game info';
     }
   }
 
@@ -118,7 +147,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const line = (typeof e.data === 'string') ? e.data : (e.data && e.data.toString && e.data.toString()) || '';
       if (!line) return;
       // reflect engine output for debugging; truncate long messages
-      bestInfo.textContent = line.length > 300 ? line.slice(0,300) + '...' : line;
+      bestInfo.textContent = line.length > 300 ? line.slice(0, 300) + '...' : line;
       // mark ready when engine replies 'readyok'
       if (line.trim() === 'readyok') engineReady = true;
       // detect bestmove output
@@ -129,33 +158,57 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     };
   } catch (err) {
-    bestInfo.textContent = 'Worker oluşturulamadı: ' + (err && err.message);
+    bestInfo.textContent = 'Worker could not be created: ' + (err && err.message);
   }
 
   async function computeBestMove() {
-    bestResult.textContent = 'Düşünüyor...';
+    bestResult.textContent = 'Thinking...';
     bestInfo.textContent = '';
     try {
-      const s = await new Promise((res) => chrome.storage.local.get(['currentGameMoves','currentGameData'], res));
+      const s = await new Promise((res) => chrome.storage.local.get(['currentGameMoves', 'currentGameData'], res));
       const moves = s.currentGameMoves || [];
       const meta = s.currentGameData || {};
 
       // Build FEN using chess.js
       if (typeof Chess === 'undefined') {
-        bestResult.textContent = 'Chess.js yok; yüklenemedi.';
-        bestInfo.textContent = 'ERROR: Chess sınıfı tanımlanmadı.';
-        console.error('Chess tanımlanmadı!');
+        bestResult.textContent = "Chess.js missing or failed to load.";
+        bestInfo.textContent = 'ERROR: Chess class is not defined.';
+        console.error('Chess not defined!');
         return;
       }
       const game = new Chess();
-      for (const mv of moves) {
-        // Convert Swedish notation (=S) to standard (=N) if needed
-        const normalizedMove = mv.replace(/=S/i, '=N');
-        const ok = game.move(normalizedMove, { sloppy: true });
-        if (!ok) {
+      let failedMove = null;
+      let failedIndex = -1;
+
+      for (let i = 0; i < moves.length; i++) {
+        let mv = moves[i].trim();
+        // Convert German/International notation to standard English
+        let normalizedMove = mv.replace(/=S/i, '=N')
+          .replace(/=T/i, '=R')
+          .replace(/=D/i, '=Q')
+          .replace(/=L/i, '=B');
+
+        // Try normalized, then try without equals sign just in case
+        let val = game.move(normalizedMove, { sloppy: true });
+        if (!val) {
+          // Fallback: try removing '=' e.g. h8=Q -> h8Q
+          val = game.move(normalizedMove.replace('=', ''), { sloppy: true });
+        }
+
+        if (!val) {
           console.warn('Hamle uygulanmadı:', normalizedMove);
+          failedMove = normalizedMove;
+          failedIndex = i + 1;
+          break; // Stop replaying to avoid cascading errors
         }
       }
+
+      if (failedMove) {
+        bestResult.textContent = `Error at move ${failedIndex}`;
+        bestInfo.textContent = `Could not parse move: "${failedMove}" (orig: "${moves[failedIndex - 1]}")`;
+        return;
+      }
+
       const fen = game.fen();
       const depth = parseInt(depthSelect.value || '15', 10);
       if (!engineWorker) {
@@ -178,7 +231,7 @@ document.addEventListener('DOMContentLoaded', () => {
       });
 
       if (!readyOk) {
-        bestResult.textContent = 'Engine hazır değil (timeout).';
+        bestResult.textContent = 'Engine not ready (timeout).';
         return;
       }
 
@@ -187,8 +240,8 @@ document.addEventListener('DOMContentLoaded', () => {
       engineWorker.postMessage('position fen ' + fen);
       engineWorker.postMessage('go depth ' + depth);
     } catch (e) {
-      bestResult.textContent = 'Hata: ' + e.message;
-      console.error('computeBestMove hatası:', e);
+      bestResult.textContent = 'Error: ' + e.message;
+      console.error('computeBestMove error:', e);
     }
   }
 
